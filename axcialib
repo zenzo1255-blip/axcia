@@ -1,0 +1,1361 @@
+local AxciaLib = {}
+
+local Players        = game:GetService("Players")
+local TweenService   = game:GetService("TweenService")
+local UIS            = game:GetService("UserInputService")
+local RunService     = game:GetService("RunService")
+local HttpService    = game:GetService("HttpService")
+local CoreGui        = game:GetService("CoreGui")
+local SoundService   = game:GetService("SoundService")
+local Debris         = game:GetService("Debris")
+local LP             = Players.LocalPlayer
+
+local uiVisible       = true
+local columnContainer = nil
+local currentTabIdx   = 1
+local tabFrameList    = {}
+local tabBtnList      = {}
+local screenGui       = nil
+
+local settings = {
+    RGBEnabled   = true,
+    AccentColor  = Color3.fromRGB(0, 255, 128),
+    SkipLoading  = false,
+}
+
+local CFG_FOLDER = "Axcia_Configs"
+local CFG_FILE   = CFG_FOLDER .. "/autoload.json"
+
+local function tw(obj, props, dur, style, dir)
+    local info = TweenInfo.new(
+        dur   or 0.3,
+        style or Enum.EasingStyle.Quart,
+        dir   or Enum.EasingDirection.Out
+    )
+    local t = TweenService:Create(obj, info, props)
+    t:Play()
+    return t
+end
+
+local function corner(p, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 6)
+    c.Parent = p
+    return c
+end
+
+local function stroke(p, col, thick, tr)
+    local s = Instance.new("UIStroke")
+    s.Color = col or Color3.fromRGB(255,255,255)
+    s.Thickness = thick or 1
+    s.Transparency = tr or 0.85
+    s.Parent = p
+    return s
+end
+
+local function playSound(id, vol, pitch)
+    local s = Instance.new("Sound")
+    s.SoundId = "rbxassetid://" .. tostring(id)
+    s.Volume = vol or 0.4
+    s.PlaybackSpeed = pitch or 1
+    s.Parent = SoundService
+    s:Play()
+    Debris:AddItem(s, 4)
+end
+
+local function ripple(btn)
+    local r = Instance.new("Frame")
+    r.Size = UDim2.new(0,0,0,0)
+    r.Position = UDim2.new(0.5,0,0.5,0)
+    r.AnchorPoint = Vector2.new(0.5,0.5)
+    r.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    r.BackgroundTransparency = 0.65
+    r.ZIndex = (btn.ZIndex or 1) + 3
+    r.Parent = btn
+    corner(r, 99)
+    tw(r, {Size = UDim2.new(2,0,2,0), BackgroundTransparency = 1}, 0.4, Enum.EasingStyle.Quart)
+    Debris:AddItem(r, 0.5)
+end
+
+local function cfgExists()
+    if not isfolder then return false end
+    return isfolder(CFG_FOLDER) and isfile(CFG_FILE)
+end
+
+local function loadCfg()
+    if not cfgExists() then return nil end
+    local ok, d = pcall(function() return HttpService:JSONDecode(readfile(CFG_FILE)) end)
+    return ok and d or nil
+end
+
+local function saveCfg(data)
+    if not makefolder or not writefile then return end
+    if not isfolder(CFG_FOLDER) then makefolder(CFG_FOLDER) end
+    local ok, s = pcall(function() return HttpService:JSONEncode(data) end)
+    if ok then writefile(CFG_FILE, s) end
+end
+
+local LoadingScreen = {}
+
+function LoadingScreen.run(onDone)
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "AxciaLoadingScreen"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.DisplayOrder = 999
+
+    local ok = pcall(function() gui.Parent = CoreGui end)
+    if not ok then gui.Parent = LP.PlayerGui end
+
+    local vp = workspace.CurrentCamera.ViewportSize
+    local W, H = vp.X, vp.Y
+
+    local bgBlur = Instance.new("BlurEffect")
+    bgBlur.Size = 0
+    bgBlur.Parent = workspace.CurrentCamera
+    tw(bgBlur, {Size = 24}, 1.5, Enum.EasingStyle.Quart)
+
+    local overlay = Instance.new("Frame")
+    overlay.Size = UDim2.new(1,0,1,0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    overlay.BackgroundTransparency = 0.35
+    overlay.BorderSizePixel = 0
+    overlay.ZIndex = 1
+    overlay.Parent = gui
+
+    local canvas = Instance.new("Frame")
+    canvas.Size = UDim2.new(1,0,1,0)
+    canvas.BackgroundTransparency = 1
+    canvas.ZIndex = 2
+    canvas.Parent = gui
+
+    local groundY = H * 0.68
+
+    local ground = Instance.new("Frame")
+    ground.Size = UDim2.new(1,0,0,2)
+    ground.Position = UDim2.new(0,0,0,groundY)
+    ground.BackgroundColor3 = Color3.fromRGB(220,220,220)
+    ground.BackgroundTransparency = 0.3
+    ground.BorderSizePixel = 0
+    ground.ZIndex = 3
+    ground.Parent = canvas
+
+    local function makeFrame(parent, sx,sy,px,py,col,z,r)
+        local f = Instance.new("Frame")
+        f.Size = UDim2.new(0,sx,0,sy)
+        f.Position = UDim2.new(0,px,0,py)
+        f.BackgroundColor3 = col or Color3.fromRGB(255,255,255)
+        f.BorderSizePixel = 0
+        f.ZIndex = z or 4
+        if r and r > 0 then corner(f, r) end
+        f.Parent = parent
+        return f
+    end
+
+    local function buildStickman(parent, centerX, baseY, skinColor, shirtColor, pantsColor)
+        local root = Instance.new("Frame")
+        root.Size = UDim2.new(0,1,0,1)
+        root.Position = UDim2.new(0, centerX, 0, baseY)
+        root.BackgroundTransparency = 1
+        root.ZIndex = 4
+        root.Parent = parent
+
+        local parts = {}
+
+        local headSize = 26
+        parts.head = makeFrame(root, headSize,headSize, -headSize/2,-headSize-40, skinColor, 5, 4)
+
+        local eyeL = makeFrame(parts.head, 5,5, 4,7, Color3.fromRGB(20,20,30), 6, 3)
+        local eyeR = makeFrame(parts.head, 5,5, 16,7, Color3.fromRGB(20,20,30), 6, 3)
+        local mouthL = makeFrame(parts.head, 3,2, 5,18, Color3.fromRGB(40,20,20), 6, 1)
+        local mouthR = makeFrame(parts.head, 3,2, 15,18, Color3.fromRGB(40,20,20), 6, 1)
+        parts.eyeL = eyeL
+        parts.eyeR = eyeR
+
+        local neckH = 6
+        parts.neck = makeFrame(root, 8,neckH, -4,-neckH-14, skinColor, 5, 2)
+
+        local bodyH = 30
+        parts.body = makeFrame(root, 20,bodyH, -10,-bodyH-20+neckH+2, shirtColor, 5, 2)
+
+        local armW, armH = 7, 26
+        parts.armL = makeFrame(root, armW,armH, -10-armW+2,-42, skinColor, 5, 3)
+        parts.armR = makeFrame(root, armW,armH, 10-2,-42, skinColor, 5, 3)
+
+        local legW, legH = 8, 30
+        parts.legL = makeFrame(root, legW,legH, -10,-20, pantsColor, 5, 3)
+        parts.legR = makeFrame(root, legW,legH, 4,-20, pantsColor, 5, 3)
+
+        parts.shoeL = makeFrame(root, 10,7, -11,-20+legH, Color3.fromRGB(40,30,20), 5, 2)
+        parts.shoeR = makeFrame(root, 10,7, 3,-20+legH, Color3.fromRGB(40,30,20), 5, 2)
+
+        parts.root = root
+        return parts
+    end
+
+    local skinV  = Color3.fromRGB(210,170,110)
+    local shirtV = Color3.fromRGB(90,110,200)
+    local pantsV = Color3.fromRGB(55,70,140)
+    local voxelCX = W * 0.48
+
+    local voxelParts = buildStickman(canvas, voxelCX, groundY, skinV, shirtV, pantsV)
+
+    local vtag = Instance.new("TextLabel")
+    vtag.Size = UDim2.new(0,80,0,20)
+    vtag.Position = UDim2.new(0, voxelCX - 40, 0, groundY - 110)
+    vtag.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    vtag.BackgroundTransparency = 0.3
+    vtag.Text = "Voxels"
+    vtag.TextColor3 = Color3.fromRGB(255,255,100)
+    vtag.TextSize = 12
+    vtag.Font = Enum.Font.GothamBold
+    vtag.BorderSizePixel = 0
+    vtag.ZIndex = 6
+    vtag.Parent = canvas
+    corner(vtag, 3)
+
+    local axciaSkinColor  = Color3.fromRGB(240,220,200)
+    local axciaShirtColor = Color3.fromRGB(200,200,210)
+    local axciaPantsColor = Color3.fromRGB(60,60,80)
+    local axciaStartX = -80
+
+    local axciaParts = buildStickman(canvas, axciaStartX, groundY, axciaSkinColor, axciaShirtColor, axciaPantsColor)
+
+    local atag = Instance.new("TextLabel")
+    atag.Size = UDim2.new(0,70,0,20)
+    atag.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    atag.BackgroundTransparency = 0.3
+    atag.Text = "Axcia"
+    atag.TextColor3 = Color3.fromRGB(255,100,100)
+    atag.TextSize = 12
+    atag.Font = Enum.Font.GothamBold
+    atag.BorderSizePixel = 0
+    atag.ZIndex = 6
+    atag.Parent = canvas
+    corner(atag, 3)
+
+    local allFadeTargets = {overlay, ground, vtag, atag}
+
+    local function updateATag()
+        atag.Position = UDim2.new(0, axciaParts.root.Position.X.Offset - 35, 0, groundY - 110)
+    end
+
+    local idleT = 0
+    local idleConn
+    idleConn = RunService.Heartbeat:Connect(function(dt)
+        idleT = idleT + dt * 2.5
+        local bob = math.sin(idleT) * 1.5
+        voxelParts.armL.Rotation = math.sin(idleT * 0.6) * 10
+        voxelParts.armR.Rotation = -math.sin(idleT * 0.6) * 10
+        voxelParts.head.Position = UDim2.new(0, -13, 0, -52 + bob * 0.4)
+    end)
+
+    local axciaTargetX  = W * 0.58
+    local walkStartTime = tick()
+    local walkDuration  = 5.0
+    local walkDone      = false
+    local walkT         = 0
+    local walkConn
+
+    walkConn = RunService.Heartbeat:Connect(function(dt)
+        local elapsed = tick() - walkStartTime
+        local progress = math.min(elapsed / walkDuration, 1)
+        local eased = 1 - (1-progress)^3
+
+        local newX = axciaStartX + (axciaTargetX - axciaStartX) * eased
+        axciaParts.root.Position = UDim2.new(0, newX, 0, groundY)
+        updateATag()
+
+        if progress < 1 then
+            walkT = walkT + dt * 7
+            local swing = math.sin(walkT) * 30
+            axciaParts.legL.Rotation = swing
+            axciaParts.legR.Rotation = -swing
+            axciaParts.armL.Rotation = -swing * 0.6
+            axciaParts.armR.Rotation = swing * 0.6
+            axciaParts.shoeL.Rotation = math.max(0, math.sin(walkT + 0.5)) * 20
+            axciaParts.shoeR.Rotation = math.max(0, math.sin(walkT + 0.5 + math.pi)) * 20
+        else
+            if not walkDone then
+                walkDone = true
+                walkConn:Disconnect()
+                axciaParts.legL.Rotation = 0
+                axciaParts.legR.Rotation = 0
+                axciaParts.armL.Rotation = 0
+                axciaParts.armR.Rotation = 0
+                axciaParts.shoeL.Rotation = 0
+                axciaParts.shoeR.Rotation = 0
+            end
+        end
+    end)
+
+    task.delay(walkDuration + 0.4, function()
+        idleConn:Disconnect()
+
+        local gunContainer = Instance.new("Frame")
+        gunContainer.Size = UDim2.new(0,1,0,1)
+        gunContainer.Position = UDim2.new(0,0,0,0)
+        gunContainer.BackgroundTransparency = 1
+        gunContainer.ZIndex = 6
+        gunContainer.Parent = axciaParts.root
+
+        local gunBody = makeFrame(gunContainer, 32,10, 8,-38, Color3.fromRGB(40,40,45), 7, 2)
+        local gunBarrel = makeFrame(gunContainer, 18,6, 34,-36, Color3.fromRGB(30,30,35), 7, 1)
+        local gunHandle = makeFrame(gunContainer, 10,16, 14,-24, Color3.fromRGB(55,35,20), 7, 2)
+        local gunTrigger = makeFrame(gunContainer, 3,8, 22,-28, Color3.fromRGB(35,35,35), 7, 1)
+
+        tw(axciaParts.armR, {Rotation = -70}, 0.55, Enum.EasingStyle.Back)
+        tw(axciaParts.armL, {Rotation = -20}, 0.4, Enum.EasingStyle.Quart)
+
+        task.delay(1.2, function()
+            playSound(5997466648, 0.7, 1.1)
+
+            local muzzleFlash = makeFrame(gunContainer, 20,20, 48,-46, Color3.fromRGB(255,220,80), 8, 10)
+            tw(muzzleFlash, {BackgroundTransparency = 1, Size = UDim2.new(0,30,0,30), Position = UDim2.new(0,43,0,-56)}, 0.12, Enum.EasingStyle.Linear)
+            Debris:AddItem(muzzleFlash, 0.15)
+
+            local bulletX1 = axciaParts.root.Position.X.Offset + 52
+            local bulletY1 = groundY - 38
+            local bulletX2 = voxelCX - 10
+            local bullet = makeFrame(canvas, 8,3, bulletX1, bulletY1, Color3.fromRGB(255,230,100), 7, 1)
+            tw(bullet, {Position = UDim2.new(0,bulletX2,0,bulletY1)}, 0.06, Enum.EasingStyle.Linear)
+            Debris:AddItem(bullet, 0.1)
+
+            task.delay(0.07, function()
+                voxelParts.head.BackgroundColor3 = Color3.fromRGB(210,60,60)
+                voxelParts.eyeL.BackgroundColor3 = Color3.fromRGB(60,20,20)
+                voxelParts.eyeR.BackgroundColor3 = Color3.fromRGB(60,20,20)
+
+                tw(voxelParts.root, {Position = UDim2.new(0, voxelCX+10, 0, groundY+8)}, 0.08, Enum.EasingStyle.Linear)
+                task.delay(0.1, function()
+                    tw(voxelParts.root, {Position = UDim2.new(0, voxelCX+5, 0, groundY)}, 0.08, Enum.EasingStyle.Linear)
+                end)
+
+                task.delay(0.25, function()
+                    tw(voxelParts.body, {Rotation = 85}, 0.5, Enum.EasingStyle.Back)
+                    tw(voxelParts.head, {Position = UDim2.new(0,-13,0,-8), Rotation = 80}, 0.5, Enum.EasingStyle.Back)
+                    tw(voxelParts.armL, {Rotation = 60}, 0.45, Enum.EasingStyle.Back)
+                    tw(voxelParts.armR, {Rotation = -30}, 0.45, Enum.EasingStyle.Back)
+                    tw(voxelParts.legL, {Rotation = -40}, 0.45, Enum.EasingStyle.Back)
+                    tw(voxelParts.legR, {Rotation = 20}, 0.45, Enum.EasingStyle.Back)
+                    tw(voxelParts.root, {Position = UDim2.new(0, voxelCX - 15, 0, groundY + 22)}, 0.55, Enum.EasingStyle.Quart)
+                    tw(vtag, {TextTransparency = 1, BackgroundTransparency = 1}, 0.6, Enum.EasingStyle.Quart)
+
+                    task.delay(0.8, function()
+                        tw(axciaParts.armR, {Rotation = 0}, 0.5, Enum.EasingStyle.Back)
+                        tw(axciaParts.armL, {Rotation = 0}, 0.5, Enum.EasingStyle.Quart)
+
+                        task.delay(0.6, function()
+                            local stareT = 0
+                            local stareConn
+                            stareConn = RunService.Heartbeat:Connect(function(dt)
+                                stareT = stareT + dt
+                                local blink = math.sin(stareT * 0.8) * 2
+                                axciaParts.head.Position = UDim2.new(0, -13, 0, -52 + blink * 0.2)
+                            end)
+
+                            task.delay(2.0, function()
+                                stareConn:Disconnect()
+                                gunContainer:Destroy()
+
+                                local function fadeAll(list, dur)
+                                    for _, obj in ipairs(list) do
+                                        if obj:IsA("Frame") then
+                                            tw(obj, {BackgroundTransparency = 1}, dur, Enum.EasingStyle.Quart)
+                                        elseif obj:IsA("TextLabel") then
+                                            tw(obj, {BackgroundTransparency = 1, TextTransparency = 1}, dur, Enum.EasingStyle.Quart)
+                                        end
+                                    end
+                                end
+
+                                local function fadeStickman(parts, dur)
+                                    for _, v in pairs(parts) do
+                                        if typeof(v) == "Instance" and v:IsA("Frame") then
+                                            tw(v, {BackgroundTransparency = 1}, dur, Enum.EasingStyle.Quart)
+                                        end
+                                    end
+                                end
+
+                                fadeStickman(voxelParts, 0.7)
+                                fadeAll({ground, overlay}, 0.7)
+
+                                task.delay(0.4, function()
+                                    fadeStickman(axciaParts, 0.8)
+                                    tw(atag, {BackgroundTransparency=1,TextTransparency=1}, 0.5, Enum.EasingStyle.Quart)
+
+                                    local faceFrame = Instance.new("Frame")
+                                    faceFrame.Size = UDim2.new(0,50,0,50)
+                                    faceFrame.Position = UDim2.new(0.5,-25,0.5,-25)
+                                    faceFrame.BackgroundColor3 = axciaSkinColor
+                                    faceFrame.BackgroundTransparency = 1
+                                    faceFrame.BorderSizePixel = 0
+                                    faceFrame.ZIndex = 10
+                                    faceFrame.Parent = canvas
+                                    corner(faceFrame, 6)
+
+                                    local fEyeL = makeFrame(faceFrame, 7,7, 8,14, Color3.fromRGB(20,20,30), 11, 4)
+                                    local fEyeR = makeFrame(faceFrame, 7,7, 32,14, Color3.fromRGB(20,20,30), 11, 4)
+
+                                    task.delay(0.5, function()
+                                        tw(faceFrame, {BackgroundTransparency = 0}, 0.4, Enum.EasingStyle.Quart)
+
+                                        task.delay(0.6, function()
+                                            tw(faceFrame, {
+                                                Size = UDim2.new(0,80,0,80),
+                                                Position = UDim2.new(0.5,-40,0.5,-40),
+                                                BackgroundColor3 = Color3.fromRGB(200,15,50)
+                                            }, 0.7, Enum.EasingStyle.Back)
+                                            tw(fEyeL, {BackgroundTransparency = 1}, 0.4)
+                                            tw(fEyeR, {BackgroundTransparency = 1}, 0.4)
+
+                                            task.delay(0.8, function()
+                                                tw(faceFrame, {BackgroundTransparency = 1, Size = UDim2.new(0,0,0,0), Position = UDim2.new(0.5,0,0.5,0)}, 0.4, Enum.EasingStyle.Quart)
+
+                                                task.delay(0.3, function()
+                                                    local logoA = Instance.new("TextLabel")
+                                                    logoA.Size = UDim2.new(0,120,0,120)
+                                                    logoA.Position = UDim2.new(0.5,-60,0.5,-70)
+                                                    logoA.BackgroundTransparency = 1
+                                                    logoA.Text = "A"
+                                                    logoA.TextColor3 = Color3.fromRGB(210,20,55)
+                                                    logoA.TextTransparency = 1
+                                                    logoA.TextSize = 108
+                                                    logoA.Font = Enum.Font.GothamBlack
+                                                    logoA.ZIndex = 12
+                                                    logoA.Parent = canvas
+
+                                                    local logoA2 = Instance.new("TextLabel")
+                                                    logoA2.Size = UDim2.new(0,120,0,120)
+                                                    logoA2.Position = UDim2.new(0.5,-60,0.5,-70)
+                                                    logoA2.BackgroundTransparency = 1
+                                                    logoA2.Text = "A"
+                                                    logoA2.TextColor3 = Color3.fromRGB(255,100,130)
+                                                    logoA2.TextTransparency = 1
+                                                    logoA2.TextSize = 114
+                                                    logoA2.Font = Enum.Font.GothamBlack
+                                                    logoA2.ZIndex = 11
+                                                    logoA2.Parent = canvas
+
+                                                    tw(logoA2, {TextTransparency = 0.7}, 0.6, Enum.EasingStyle.Quart)
+                                                    tw(logoA, {TextTransparency = 0}, 0.5, Enum.EasingStyle.Quart)
+
+                                                    task.delay(0.7, function()
+                                                        local xciaLbl = Instance.new("TextLabel")
+                                                        xciaLbl.Size = UDim2.new(0,0,0,80)
+                                                        xciaLbl.Position = UDim2.new(0.5,30,0.5,-40)
+                                                        xciaLbl.BackgroundTransparency = 1
+                                                        xciaLbl.Text = "xcia"
+                                                        xciaLbl.TextColor3 = Color3.fromRGB(240,240,250)
+                                                        xciaLbl.TextTransparency = 1
+                                                        xciaLbl.TextSize = 72
+                                                        xciaLbl.Font = Enum.Font.GothamBlack
+                                                        xciaLbl.ClipsDescendants = true
+                                                        xciaLbl.ZIndex = 12
+                                                        xciaLbl.Parent = canvas
+
+                                                        tw(xciaLbl, {
+                                                            Size = UDim2.new(0,200,0,80),
+                                                            TextTransparency = 0
+                                                        }, 0.7, Enum.EasingStyle.Quart)
+
+                                                        local glowPositions = {
+                                                            {UDim2.new(0,-30,0,-30)},
+                                                            {UDim2.new(1,-70,0,-30)},
+                                                            {UDim2.new(0,-30,1,-70)},
+                                                            {UDim2.new(1,-70,1,-70)},
+                                                        }
+                                                        local glowObjs = {}
+                                                        for i, gdata in ipairs(glowPositions) do
+                                                            local glowOuter = Instance.new("Frame")
+                                                            glowOuter.Size = UDim2.new(0,60,0,60)
+                                                            glowOuter.Position = gdata[1]
+                                                            glowOuter.BackgroundColor3 = Color3.fromRGB(40,80,255)
+                                                            glowOuter.BackgroundTransparency = 1
+                                                            glowOuter.BorderSizePixel = 0
+                                                            glowOuter.ZIndex = 8
+                                                            corner(glowOuter, 30)
+                                                            glowOuter.Parent = canvas
+
+                                                            local glowMid = Instance.new("Frame")
+                                                            glowMid.Size = UDim2.new(0,35,0,35)
+                                                            glowMid.Position = UDim2.new(0.5,-17.5,0.5,-17.5)
+                                                            glowMid.BackgroundColor3 = Color3.fromRGB(80,130,255)
+                                                            glowMid.BackgroundTransparency = 1
+                                                            glowMid.BorderSizePixel = 0
+                                                            glowMid.ZIndex = 9
+                                                            corner(glowMid, 20)
+                                                            glowMid.Parent = glowOuter
+
+                                                            local glowCore = Instance.new("Frame")
+                                                            glowCore.Size = UDim2.new(0,16,0,16)
+                                                            glowCore.Position = UDim2.new(0.5,-8,0.5,-8)
+                                                            glowCore.BackgroundColor3 = Color3.fromRGB(160,200,255)
+                                                            glowCore.BackgroundTransparency = 1
+                                                            glowCore.BorderSizePixel = 0
+                                                            glowCore.ZIndex = 10
+                                                            corner(glowCore, 8)
+                                                            glowCore.Parent = glowOuter
+
+                                                            tw(glowOuter, {BackgroundTransparency = 0.55, Size = UDim2.new(0,100,0,100), Position = gdata[1]}, 1.0, Enum.EasingStyle.Quart)
+                                                            tw(glowMid, {BackgroundTransparency = 0.35}, 1.0, Enum.EasingStyle.Quart)
+                                                            tw(glowCore, {BackgroundTransparency = 0.05}, 1.0, Enum.EasingStyle.Quart)
+                                                            table.insert(glowObjs, {glowOuter, glowMid, glowCore})
+                                                        end
+
+                                                        task.delay(3.0, function()
+                                                            tw(logoA, {TextTransparency = 1}, 0.8, Enum.EasingStyle.Quart)
+                                                            tw(logoA2, {TextTransparency = 1}, 0.8, Enum.EasingStyle.Quart)
+                                                            tw(xciaLbl, {TextTransparency = 1}, 0.8, Enum.EasingStyle.Quart)
+                                                            for _, gset in ipairs(glowObjs) do
+                                                                tw(gset[1], {BackgroundTransparency = 1}, 0.8, Enum.EasingStyle.Quart)
+                                                                tw(gset[2], {BackgroundTransparency = 1}, 0.8, Enum.EasingStyle.Quart)
+                                                                tw(gset[3], {BackgroundTransparency = 1}, 0.8, Enum.EasingStyle.Quart)
+                                                            end
+
+                                                            task.delay(0.9, function()
+                                                                tw(bgBlur, {Size = 0}, 1.0, Enum.EasingStyle.Quart)
+                                                                task.delay(1.1, function()
+                                                                    gui:Destroy()
+                                                                    if onDone then onDone() end
+                                                                end)
+                                                            end)
+                                                        end)
+                                                    end)
+                                                end)
+                                            end)
+                                        end)
+                                    end)
+                                end)
+                            end)
+                        end)
+                    end)
+                end)
+            end)
+        end)
+    end)
+end
+
+local function buildUI()
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AxciaUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.DisplayOrder = 100
+
+    local ok = pcall(function() screenGui.Parent = CoreGui end)
+    if not ok then screenGui.Parent = LP.PlayerGui end
+
+    local colHolder = Instance.new("Frame")
+    colHolder.Name = "ColHolder"
+    colHolder.Size = UDim2.new(1,0,1,0)
+    colHolder.BackgroundTransparency = 1
+    colHolder.Parent = screenGui
+
+    local colFlex = Instance.new("Frame")
+    colFlex.Name = "ColFlex"
+    colFlex.AnchorPoint = Vector2.new(0.5,0.5)
+    colFlex.Position = UDim2.new(0.5,0,0.46,0)
+    colFlex.Size = UDim2.new(0,0,0,0)
+    colFlex.AutomaticSize = Enum.AutomaticSize.XY
+    colFlex.BackgroundTransparency = 1
+    colFlex.Parent = colHolder
+
+    local colLayout = Instance.new("UIListLayout")
+    colLayout.FillDirection = Enum.FillDirection.Horizontal
+    colLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    colLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    colLayout.Padding = UDim.new(0,14)
+    colLayout.Parent = colFlex
+
+    columnContainer = colFlex
+
+    local settingsFrame = Instance.new("Frame")
+    settingsFrame.Name = "SettingsTab"
+    settingsFrame.AnchorPoint = Vector2.new(0.5,0.5)
+    settingsFrame.Position = UDim2.new(0.5,0,0.46,0)
+    settingsFrame.Size = UDim2.new(0,340,0,0)
+    settingsFrame.AutomaticSize = Enum.AutomaticSize.Y
+    settingsFrame.BackgroundColor3 = Color3.fromRGB(16,16,18)
+    settingsFrame.BorderSizePixel = 0
+    settingsFrame.Visible = false
+    settingsFrame.Parent = screenGui
+    corner(settingsFrame, 10)
+    stroke(settingsFrame, Color3.fromRGB(255,255,255), 1, 0.86)
+
+    local sTitleLbl = Instance.new("TextLabel")
+    sTitleLbl.Size = UDim2.new(1,0,0,40)
+    sTitleLbl.BackgroundTransparency = 1
+    sTitleLbl.Text = "SETTINGS"
+    sTitleLbl.TextColor3 = Color3.fromRGB(255,255,255)
+    sTitleLbl.TextSize = 12
+    sTitleLbl.Font = Enum.Font.GothamBold
+    sTitleLbl.Parent = settingsFrame
+
+    local sPad = Instance.new("UIPadding")
+    sPad.PaddingLeft = UDim.new(0,14)
+    sPad.PaddingRight = UDim.new(0,14)
+    sPad.PaddingBottom = UDim.new(0,14)
+    sPad.PaddingTop = UDim.new(0,44)
+    sPad.Parent = settingsFrame
+
+    local sLayout = Instance.new("UIListLayout")
+    sLayout.Padding = UDim.new(0,8)
+    sLayout.Parent = settingsFrame
+
+    local function addSettingsToggle(name, val, cb)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1,0,0,34)
+        row.BackgroundTransparency = 1
+        row.Parent = settingsFrame
+
+        local lbl = Instance.new("TextLabel")
+        lbl.Size = UDim2.new(1,-52,1,0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = name
+        lbl.TextColor3 = Color3.fromRGB(200,200,206)
+        lbl.TextSize = 11
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+        lbl.Parent = row
+
+        local bg = Instance.new("Frame")
+        bg.Size = UDim2.new(0,42,0,20)
+        bg.Position = UDim2.new(1,-44,0.5,-10)
+        bg.BackgroundColor3 = val and Color3.fromRGB(0,190,95) or Color3.fromRGB(50,50,56)
+        bg.BorderSizePixel = 0
+        corner(bg, 10)
+        bg.Parent = row
+
+        local knob = Instance.new("Frame")
+        knob.Size = UDim2.new(0,14,0,14)
+        knob.Position = val and UDim2.new(0,25,0.5,-7) or UDim2.new(0,3,0.5,-7)
+        knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+        knob.BorderSizePixel = 0
+        corner(knob, 7)
+        knob.Parent = bg
+
+        local state = val
+        local hit = Instance.new("TextButton")
+        hit.Size = UDim2.new(1,0,1,0)
+        hit.BackgroundTransparency = 1
+        hit.Text = ""
+        hit.Parent = bg
+        hit.MouseButton1Click:Connect(function()
+            state = not state
+            playSound(876939830, 0.3, state and 1.1 or 0.85)
+            tw(bg, {BackgroundColor3 = state and Color3.fromRGB(0,190,95) or Color3.fromRGB(50,50,56)}, 0.22)
+            tw(knob, {Position = state and UDim2.new(0,25,0.5,-7) or UDim2.new(0,3,0.5,-7)}, 0.22, Enum.EasingStyle.Back)
+            if cb then cb(state) end
+        end)
+    end
+
+    addSettingsToggle("RGB ARRAYLIST", settings.RGBEnabled, function(v) settings.RGBEnabled = v end)
+    addSettingsToggle("SKIP LOADING SCREEN", settings.SkipLoading, function(v)
+        settings.SkipLoading = v
+        saveCfg(settings)
+    end)
+
+    local configFrame = Instance.new("Frame")
+    configFrame.Name = "ConfigTab"
+    configFrame.AnchorPoint = Vector2.new(0.5,0.5)
+    configFrame.Position = UDim2.new(0.5,0,0.46,0)
+    configFrame.Size = UDim2.new(0,340,0,0)
+    configFrame.AutomaticSize = Enum.AutomaticSize.Y
+    configFrame.BackgroundColor3 = Color3.fromRGB(16,16,18)
+    configFrame.BorderSizePixel = 0
+    configFrame.Visible = false
+    configFrame.Parent = screenGui
+    corner(configFrame, 10)
+    stroke(configFrame, Color3.fromRGB(255,255,255), 1, 0.86)
+
+    local cTitleLbl = Instance.new("TextLabel")
+    cTitleLbl.Size = UDim2.new(1,0,0,40)
+    cTitleLbl.BackgroundTransparency = 1
+    cTitleLbl.Text = "CONFIG MANAGER"
+    cTitleLbl.TextColor3 = Color3.fromRGB(255,255,255)
+    cTitleLbl.TextSize = 12
+    cTitleLbl.Font = Enum.Font.GothamBold
+    cTitleLbl.Parent = configFrame
+
+    local cPad = Instance.new("UIPadding")
+    cPad.PaddingLeft = UDim.new(0,14)
+    cPad.PaddingRight = UDim.new(0,14)
+    cPad.PaddingBottom = UDim.new(0,14)
+    cPad.PaddingTop = UDim.new(0,44)
+    cPad.Parent = configFrame
+
+    local cLayout = Instance.new("UIListLayout")
+    cLayout.Padding = UDim.new(0,8)
+    cLayout.Parent = configFrame
+
+    local statusLbl = Instance.new("TextLabel")
+    statusLbl.Size = UDim2.new(1,0,0,24)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Text = ""
+    statusLbl.TextColor3 = Color3.fromRGB(0,200,100)
+    statusLbl.TextSize = 11
+    statusLbl.Font = Enum.Font.Gotham
+    statusLbl.Parent = configFrame
+
+    local function setStatus(msg, col)
+        statusLbl.Text = msg
+        statusLbl.TextColor3 = col or Color3.fromRGB(0,200,100)
+        task.delay(3, function()
+            if statusLbl and statusLbl.Parent then
+                statusLbl.Text = ""
+            end
+        end)
+    end
+
+    local function makeConfigBtn(label, bgCol)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1,0,0,36)
+        btn.BackgroundColor3 = bgCol or Color3.fromRGB(30,30,36)
+        btn.Text = label
+        btn.TextColor3 = Color3.fromRGB(200,200,205)
+        btn.TextSize = 11
+        btn.Font = Enum.Font.GothamBold
+        btn.BorderSizePixel = 0
+        corner(btn, 6)
+        btn.Parent = configFrame
+        btn.MouseButton1Click:Connect(function() ripple(btn) end)
+        return btn
+    end
+
+    local saveBtn   = makeConfigBtn("SAVE CONFIG",   Color3.fromRGB(24,66,42))
+    local loadBtn   = makeConfigBtn("LOAD CONFIG",   Color3.fromRGB(24,42,66))
+    local deleteBtn = makeConfigBtn("DELETE CONFIG", Color3.fromRGB(66,22,22))
+
+    local pathLbl = Instance.new("TextLabel")
+    pathLbl.Size = UDim2.new(1,0,0,28)
+    pathLbl.BackgroundTransparency = 1
+    pathLbl.Text = "Path: workspace/" .. CFG_FOLDER
+    pathLbl.TextColor3 = Color3.fromRGB(100,100,110)
+    pathLbl.TextSize = 10
+    pathLbl.Font = Enum.Font.Gotham
+    pathLbl.TextXAlignment = Enum.TextXAlignment.Left
+    pathLbl.Parent = configFrame
+
+    saveBtn.MouseButton1Click:Connect(function()
+        local ok = pcall(saveCfg, settings)
+        setStatus(ok and "CONFIG SAVED" or "SAVE FAILED", ok and Color3.fromRGB(0,220,100) or Color3.fromRGB(220,60,60))
+    end)
+
+    loadBtn.MouseButton1Click:Connect(function()
+        local d = loadCfg()
+        if d then
+            for k,v in pairs(d) do settings[k]=v end
+            setStatus("CONFIG LOADED", Color3.fromRGB(80,180,255))
+        else
+            setStatus("NO CONFIG FOUND", Color3.fromRGB(220,160,60))
+        end
+    end)
+
+    deleteBtn.MouseButton1Click:Connect(function()
+        if isfile and isfile(CFG_FILE) then
+            pcall(delfile, CFG_FILE)
+            setStatus("CONFIG DELETED", Color3.fromRGB(220,60,60))
+        else
+            setStatus("NOTHING TO DELETE", Color3.fromRGB(170,170,180))
+        end
+    end)
+
+    tabFrameList = {colHolder, settingsFrame, configFrame}
+
+    local tabBar = Instance.new("Frame")
+    tabBar.Name = "TabBar"
+    tabBar.AnchorPoint = Vector2.new(0.5,1)
+    tabBar.Position = UDim2.new(0.5,0,1,-22)
+    tabBar.Size = UDim2.new(0,148,0,48)
+    tabBar.BackgroundColor3 = Color3.fromRGB(12,12,14)
+    tabBar.BorderSizePixel = 0
+    tabBar.Parent = screenGui
+    corner(tabBar, 16)
+    stroke(tabBar, Color3.fromRGB(255,255,255), 1, 0.88)
+
+    local tbLayout = Instance.new("UIListLayout")
+    tbLayout.FillDirection = Enum.FillDirection.Horizontal
+    tbLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    tbLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    tbLayout.Padding = UDim.new(0,4)
+    tbLayout.Parent = tabBar
+
+    local icons = {"⊞","⚙","⊙"}
+
+    local function switchTab(idx)
+        if idx == currentTabIdx then return end
+        playSound(1083195953, 0.25, 0.95 + idx * 0.04)
+
+        local oldFrame = tabFrameList[currentTabIdx]
+        local newFrame = tabFrameList[idx]
+
+        tw(oldFrame, {BackgroundTransparency = 1}, 0.15, Enum.EasingStyle.Quart)
+        task.delay(0.18, function()
+            oldFrame.Visible = false
+            if oldFrame.Name ~= "ColHolder" then
+                oldFrame.BackgroundTransparency = 0
+            end
+        end)
+
+        currentTabIdx = idx
+
+        newFrame.Visible = true
+        if newFrame.Name == "ColHolder" then
+            newFrame.BackgroundTransparency = 1
+        else
+            newFrame.BackgroundTransparency = 1
+            tw(newFrame, {BackgroundTransparency = 0}, 0.22, Enum.EasingStyle.Quart)
+        end
+
+        local origPos = newFrame.Position
+        newFrame.Position = UDim2.new(origPos.X.Scale, origPos.X.Offset, origPos.Y.Scale, origPos.Y.Offset + 14)
+        tw(newFrame, {Position = origPos}, 0.3, Enum.EasingStyle.Quart)
+
+        for i, btn in ipairs(tabBtnList) do
+            if i == idx then
+                tw(btn, {BackgroundColor3 = Color3.fromRGB(30,30,36)}, 0.2)
+                btn.TextColor3 = Color3.fromRGB(0,255,128)
+            else
+                tw(btn, {BackgroundColor3 = Color3.fromRGB(16,16,18)}, 0.2)
+                btn.TextColor3 = Color3.fromRGB(130,130,140)
+            end
+        end
+    end
+
+    for i, icon in ipairs(icons) do
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0,38,0,34)
+        btn.BackgroundColor3 = i == 1 and Color3.fromRGB(30,30,36) or Color3.fromRGB(16,16,18)
+        btn.Text = icon
+        btn.TextColor3 = i == 1 and Color3.fromRGB(0,255,128) or Color3.fromRGB(130,130,140)
+        btn.TextSize = 17
+        btn.Font = Enum.Font.GothamBold
+        btn.BorderSizePixel = 0
+        corner(btn, 10)
+        btn.Parent = tabBar
+
+        btn.MouseButton1Click:Connect(function()
+            switchTab(i)
+        end)
+
+        table.insert(tabBtnList, btn)
+    end
+
+    local mobileBtn = Instance.new("TextButton")
+    mobileBtn.Size = UDim2.new(0,78,0,28)
+    mobileBtn.Position = UDim2.new(0.5,-39,0,8)
+    mobileBtn.BackgroundColor3 = Color3.fromRGB(8,8,10)
+    mobileBtn.Text = "Toggle"
+    mobileBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    mobileBtn.TextSize = 12
+    mobileBtn.Font = Enum.Font.GothamBold
+    mobileBtn.BorderSizePixel = 0
+    mobileBtn.ZIndex = 50
+    mobileBtn.Parent = screenGui
+    corner(mobileBtn, 6)
+    stroke(mobileBtn, Color3.fromRGB(255,255,255), 1, 0.72)
+
+    local function toggleUI()
+        uiVisible = not uiVisible
+        playSound(uiVisible and 3306536429 or 3306536430, 0.45)
+
+        local showTab = tabFrameList[currentTabIdx]
+        if uiVisible then
+            showTab.Visible = true
+            tabBar.Visible = true
+            tabBar.Position = UDim2.new(0.5,0,1,-10)
+            tw(tabBar, {Position = UDim2.new(0.5,0,1,-22)}, 0.35, Enum.EasingStyle.Back)
+            if showTab.Name ~= "ColHolder" then
+                showTab.BackgroundTransparency = 1
+                tw(showTab, {BackgroundTransparency = 0}, 0.3)
+            end
+        else
+            tw(tabBar, {Position = UDim2.new(0.5,0,1,10)}, 0.22, Enum.EasingStyle.Quart)
+            task.delay(0.25, function()
+                tabBar.Visible = false
+                for _, f in ipairs(tabFrameList) do
+                    f.Visible = false
+                end
+            end)
+        end
+    end
+
+    mobileBtn.MouseButton1Click:Connect(toggleUI)
+
+    UIS.InputBegan:Connect(function(inp, gpe)
+        if gpe then return end
+        if inp.KeyCode == Enum.KeyCode.RightShift then toggleUI() end
+    end)
+
+    local rgbHue = 0
+    RunService.Heartbeat:Connect(function(dt)
+        if not settings.RGBEnabled then return end
+        rgbHue = (rgbHue + dt * 0.35) % 1
+        local col = Color3.fromHSV(rgbHue, 1, 1)
+        for i, btn in ipairs(tabBtnList) do
+            if i == currentTabIdx then
+                btn.TextColor3 = col
+            end
+        end
+    end)
+end
+
+function AxciaLib:CreateWindow(opts)
+    opts = opts or {}
+    local skipLoad = opts.SkipLoading
+
+    local savedCfg = loadCfg()
+    if savedCfg then
+        for k,v in pairs(savedCfg) do settings[k]=v end
+        if settings.SkipLoading then skipLoad = true end
+    end
+
+    local win = {}
+
+    local function init()
+        buildUI()
+    end
+
+    if skipLoad then
+        init()
+    else
+        LoadingScreen.run(function()
+            init()
+        end)
+    end
+
+    function win:CreateColumn(colOpts)
+        colOpts = colOpts or {}
+        local title = (colOpts.Title or "COLUMN"):upper()
+
+        local waitStep = 0
+        while not columnContainer or not columnContainer.Parent do
+            waitStep = waitStep + 1
+            task.wait(0.05)
+            if waitStep > 100 then break end
+        end
+
+        local col = Instance.new("Frame")
+        col.Name = "Col_" .. title
+        col.Size = UDim2.new(0, 210, 0, 0)
+        col.AutomaticSize = Enum.AutomaticSize.Y
+        col.BackgroundColor3 = Color3.fromRGB(16, 16, 18)
+        col.BorderSizePixel = 0
+        col.BackgroundTransparency = 1
+        col.Parent = columnContainer
+        corner(col, 8)
+        stroke(col, Color3.fromRGB(255,255,255), 1, 0.84)
+
+        tw(col, {BackgroundTransparency = 0}, 0.4, Enum.EasingStyle.Quart)
+
+        local titleLbl = Instance.new("TextLabel")
+        titleLbl.Size = UDim2.new(1,0,0,36)
+        titleLbl.BackgroundTransparency = 1
+        titleLbl.Text = title
+        titleLbl.TextColor3 = Color3.fromRGB(255,255,255)
+        titleLbl.TextSize = 11
+        titleLbl.Font = Enum.Font.GothamBold
+        titleLbl.LetterSpacing = 3
+        titleLbl.Parent = col
+
+        local div = Instance.new("Frame")
+        div.Size = UDim2.new(1,0,0,1)
+        div.Position = UDim2.new(0,0,0,36)
+        div.BackgroundColor3 = Color3.fromRGB(255,255,255)
+        div.BackgroundTransparency = 0.86
+        div.BorderSizePixel = 0
+        div.Parent = col
+
+        local itemsFrame = Instance.new("Frame")
+        itemsFrame.Name = "Items"
+        itemsFrame.Size = UDim2.new(1,0,0,0)
+        itemsFrame.Position = UDim2.new(0,0,0,37)
+        itemsFrame.AutomaticSize = Enum.AutomaticSize.Y
+        itemsFrame.BackgroundTransparency = 1
+        itemsFrame.Parent = col
+
+        local iLayout = Instance.new("UIListLayout")
+        iLayout.Padding = UDim.new(0,0)
+        iLayout.Parent = itemsFrame
+
+        local iPad = Instance.new("UIPadding")
+        iPad.PaddingLeft   = UDim.new(0,12)
+        iPad.PaddingRight  = UDim.new(0,12)
+        iPad.PaddingBottom = UDim.new(0,10)
+        iPad.Parent = itemsFrame
+
+        local colObj = {}
+
+        function colObj:AddToggle(tOpts)
+            tOpts = tOpts or {}
+            local name     = (tOpts.Name or "Toggle"):upper()
+            local default  = tOpts.Default or false
+            local callback = tOpts.Callback or function() end
+            local state    = default
+
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1,0,0,36)
+            row.BackgroundTransparency = 1
+            row.Parent = itemsFrame
+
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.new(1,-38,1,0)
+            lbl.BackgroundTransparency = 1
+            lbl.Text = name
+            lbl.TextColor3 = Color3.fromRGB(205,205,212)
+            lbl.TextSize = 11
+            lbl.Font = Enum.Font.GothamBold
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.Parent = row
+
+            local tbg = Instance.new("Frame")
+            tbg.Size = UDim2.new(0,28,0,14)
+            tbg.Position = UDim2.new(1,-30,0.5,-7)
+            tbg.BackgroundColor3 = state and Color3.fromRGB(0,190,95) or Color3.fromRGB(48,48,54)
+            tbg.BorderSizePixel = 0
+            corner(tbg, 7)
+            tbg.Parent = row
+
+            local tknob = Instance.new("Frame")
+            tknob.Size = UDim2.new(0,10,0,10)
+            tknob.Position = state and UDim2.new(0,16,0.5,-5) or UDim2.new(0,2,0.5,-5)
+            tknob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+            tknob.BorderSizePixel = 0
+            corner(tknob, 5)
+            tknob.Parent = tbg
+
+            local hit = Instance.new("TextButton")
+            hit.Size = UDim2.new(1,0,1,0)
+            hit.BackgroundTransparency = 1
+            hit.Text = ""
+            hit.Parent = row
+
+            hit.MouseButton1Click:Connect(function()
+                state = not state
+                playSound(876939830, 0.28, state and 1.08 or 0.88)
+                tw(tbg, {BackgroundColor3 = state and Color3.fromRGB(0,190,95) or Color3.fromRGB(48,48,54)}, 0.22)
+                tw(tknob, {Position = state and UDim2.new(0,16,0.5,-5) or UDim2.new(0,2,0.5,-5)}, 0.22, Enum.EasingStyle.Back)
+                task.spawn(callback, state)
+            end)
+
+            local ref = {}
+            function ref:Set(v)
+                state = v
+                tw(tbg, {BackgroundColor3 = state and Color3.fromRGB(0,190,95) or Color3.fromRGB(48,48,54)}, 0.22)
+                tw(tknob, {Position = state and UDim2.new(0,16,0.5,-5) or UDim2.new(0,2,0.5,-5)}, 0.22, Enum.EasingStyle.Back)
+                task.spawn(callback, state)
+            end
+            function ref:Get() return state end
+            return ref
+        end
+
+        function colObj:AddButton(bOpts)
+            bOpts = bOpts or {}
+            local name     = (bOpts.Name or "Button"):upper()
+            local callback = bOpts.Callback or function() end
+
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1,0,0,38)
+            row.BackgroundTransparency = 1
+            row.Parent = itemsFrame
+
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1,0,0,28)
+            btn.Position = UDim2.new(0,0,0,5)
+            btn.BackgroundColor3 = Color3.fromRGB(26,26,30)
+            btn.Text = name
+            btn.TextColor3 = Color3.fromRGB(195,195,202)
+            btn.TextSize = 10
+            btn.Font = Enum.Font.GothamBold
+            btn.BorderSizePixel = 0
+            corner(btn, 5)
+            stroke(btn, Color3.fromRGB(255,255,255), 1, 0.9)
+            btn.Parent = row
+
+            btn.MouseEnter:Connect(function()
+                tw(btn, {BackgroundColor3 = Color3.fromRGB(36,36,42)}, 0.12)
+            end)
+            btn.MouseLeave:Connect(function()
+                tw(btn, {BackgroundColor3 = Color3.fromRGB(26,26,30)}, 0.12)
+            end)
+            btn.MouseButton1Click:Connect(function()
+                ripple(btn)
+                playSound(876939830, 0.22, 1.25)
+                task.spawn(callback)
+            end)
+        end
+
+        function colObj:AddSlider(sOpts)
+            sOpts = sOpts or {}
+            local name     = (sOpts.Name or "Slider"):upper()
+            local minVal   = sOpts.Min     or 0
+            local maxVal   = sOpts.Max     or 100
+            local defVal   = sOpts.Default or minVal
+            local callback = sOpts.Callback or function() end
+            local value    = math.clamp(defVal, minVal, maxVal)
+
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1,0,0,46)
+            row.BackgroundTransparency = 1
+            row.Parent = itemsFrame
+
+            local topRow = Instance.new("Frame")
+            topRow.Size = UDim2.new(1,0,0,18)
+            topRow.BackgroundTransparency = 1
+            topRow.Parent = row
+
+            local nLbl = Instance.new("TextLabel")
+            nLbl.Size = UDim2.new(0.72,0,1,0)
+            nLbl.BackgroundTransparency = 1
+            nLbl.Text = name
+            nLbl.TextColor3 = Color3.fromRGB(205,205,212)
+            nLbl.TextSize = 11
+            nLbl.Font = Enum.Font.GothamBold
+            nLbl.TextXAlignment = Enum.TextXAlignment.Left
+            nLbl.Parent = topRow
+
+            local vLbl = Instance.new("TextLabel")
+            vLbl.Size = UDim2.new(0.28,0,1,0)
+            vLbl.Position = UDim2.new(0.72,0,0,0)
+            vLbl.BackgroundTransparency = 1
+            vLbl.Text = tostring(value)
+            vLbl.TextColor3 = Color3.fromRGB(0,190,95)
+            vLbl.TextSize = 11
+            vLbl.Font = Enum.Font.GothamBold
+            vLbl.TextXAlignment = Enum.TextXAlignment.Right
+            vLbl.Parent = topRow
+
+            local trackBg = Instance.new("Frame")
+            trackBg.Size = UDim2.new(1,0,0,5)
+            trackBg.Position = UDim2.new(0,0,0,26)
+            trackBg.BackgroundColor3 = Color3.fromRGB(42,42,48)
+            trackBg.BorderSizePixel = 0
+            corner(trackBg, 3)
+            trackBg.Parent = row
+
+            local pct = (value - minVal) / (maxVal - minVal)
+            local fill = Instance.new("Frame")
+            fill.Size = UDim2.new(pct,0,1,0)
+            fill.BackgroundColor3 = Color3.fromRGB(0,190,95)
+            fill.BorderSizePixel = 0
+            corner(fill, 3)
+            fill.Parent = trackBg
+
+            local knob = Instance.new("Frame")
+            knob.Size = UDim2.new(0,12,0,12)
+            knob.Position = UDim2.new(pct,-6,0.5,-6)
+            knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+            knob.BorderSizePixel = 0
+            corner(knob, 6)
+            knob.Parent = trackBg
+
+            local dragging = false
+            trackBg.InputBegan:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                end
+            end)
+            UIS.InputEnded:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                    dragging = false
+                end
+            end)
+            RunService.Heartbeat:Connect(function()
+                if not dragging then return end
+                local mpos = UIS:GetMouseLocation()
+                local abs  = trackBg.AbsolutePosition
+                local sz   = trackBg.AbsoluteSize
+                local t    = math.clamp((mpos.X - abs.X) / sz.X, 0, 1)
+                local nv   = math.floor(minVal + t * (maxVal - minVal) + 0.5)
+                if nv ~= value then
+                    value = nv
+                    vLbl.Text = tostring(value)
+                    fill.Size = UDim2.new(t,0,1,0)
+                    knob.Position = UDim2.new(t,-6,0.5,-6)
+                    task.spawn(callback, value)
+                end
+            end)
+
+            local ref = {}
+            function ref:Set(v)
+                value = math.clamp(v, minVal, maxVal)
+                local t = (value - minVal) / (maxVal - minVal)
+                fill.Size = UDim2.new(t,0,1,0)
+                knob.Position = UDim2.new(t,-6,0.5,-6)
+                vLbl.Text = tostring(value)
+                task.spawn(callback, value)
+            end
+            function ref:Get() return value end
+            return ref
+        end
+
+        function colObj:AddDropdown(dOpts)
+            dOpts = dOpts or {}
+            local name     = (dOpts.Name or "Dropdown"):upper()
+            local items    = dOpts.Items   or {}
+            local default  = dOpts.Default or (items[1] or "")
+            local callback = dOpts.Callback or function() end
+            local selected = default
+            local open     = false
+
+            local wrapper = Instance.new("Frame")
+            wrapper.Size = UDim2.new(1,0,0,38)
+            wrapper.BackgroundTransparency = 1
+            wrapper.ClipsDescendants = false
+            wrapper.Parent = itemsFrame
+
+            local nLbl = Instance.new("TextLabel")
+            nLbl.Size = UDim2.new(1,0,0,16)
+            nLbl.BackgroundTransparency = 1
+            nLbl.Text = name
+            nLbl.TextColor3 = Color3.fromRGB(205,205,212)
+            nLbl.TextSize = 11
+            nLbl.Font = Enum.Font.GothamBold
+            nLbl.TextXAlignment = Enum.TextXAlignment.Left
+            nLbl.Parent = wrapper
+
+            local dropBtn = Instance.new("TextButton")
+            dropBtn.Size = UDim2.new(1,0,0,20)
+            dropBtn.Position = UDim2.new(0,0,0,17)
+            dropBtn.BackgroundColor3 = Color3.fromRGB(26,26,30)
+            dropBtn.Text = tostring(selected)
+            dropBtn.TextColor3 = Color3.fromRGB(190,190,196)
+            dropBtn.TextSize = 10
+            dropBtn.Font = Enum.Font.GothamBold
+            dropBtn.BorderSizePixel = 0
+            corner(dropBtn, 5)
+            dropBtn.Parent = wrapper
+
+            local arrowLbl = Instance.new("TextLabel")
+            arrowLbl.Size = UDim2.new(0,18,1,0)
+            arrowLbl.Position = UDim2.new(1,-20,0,0)
+            arrowLbl.BackgroundTransparency = 1
+            arrowLbl.Text = "▼"
+            arrowLbl.TextColor3 = Color3.fromRGB(140,140,150)
+            arrowLbl.TextSize = 8
+            arrowLbl.Font = Enum.Font.GothamBold
+            arrowLbl.Parent = dropBtn
+
+            local dropListFrame = Instance.new("Frame")
+            dropListFrame.Size = UDim2.new(1,0,0,0)
+            dropListFrame.Position = UDim2.new(0,0,1,2)
+            dropListFrame.BackgroundColor3 = Color3.fromRGB(22,22,26)
+            dropListFrame.BorderSizePixel = 0
+            dropListFrame.ClipsDescendants = true
+            dropListFrame.ZIndex = 20
+            corner(dropListFrame, 5)
+            dropListFrame.Parent = dropBtn
+
+            local dListLayout = Instance.new("UIListLayout")
+            dListLayout.Parent = dropListFrame
+
+            for _, item in ipairs(items) do
+                local opt = Instance.new("TextButton")
+                opt.Size = UDim2.new(1,0,0,20)
+                opt.BackgroundTransparency = 1
+                opt.Text = tostring(item)
+                opt.TextColor3 = Color3.fromRGB(185,185,192)
+                opt.TextSize = 10
+                opt.Font = Enum.Font.GothamBold
+                opt.ZIndex = 21
+                opt.Parent = dropListFrame
+                opt.MouseButton1Click:Connect(function()
+                    selected = tostring(item)
+                    dropBtn.Text = selected
+                    open = false
+                    tw(dropListFrame, {Size = UDim2.new(1,0,0,0)}, 0.2, Enum.EasingStyle.Quart)
+                    tw(arrowLbl, {Rotation = 0}, 0.2)
+                    task.spawn(callback, selected)
+                end)
+                opt.MouseEnter:Connect(function()
+                    tw(opt, {BackgroundTransparency = 0.8}, 0.1)
+                    opt.BackgroundColor3 = Color3.fromRGB(255,255,255)
+                end)
+                opt.MouseLeave:Connect(function()
+                    tw(opt, {BackgroundTransparency = 1}, 0.1)
+                end)
+            end
+
+            dropBtn.MouseButton1Click:Connect(function()
+                open = not open
+                local targetH = open and (#items * 20) or 0
+                tw(dropListFrame, {Size = UDim2.new(1,0,0,targetH)}, 0.2, Enum.EasingStyle.Quart)
+                tw(arrowLbl, {Rotation = open and 180 or 0}, 0.2)
+            end)
+
+            local ref = {}
+            function ref:Set(v)
+                selected = v
+                dropBtn.Text = v
+                task.spawn(callback, v)
+            end
+            function ref:Get() return selected end
+            return ref
+        end
+
+        function colObj:AddLabel(text)
+            local lbl = Instance.new("TextLabel")
+            lbl.Size = UDim2.new(1,0,0,24)
+            lbl.BackgroundTransparency = 1
+            lbl.Text = (text or ""):upper()
+            lbl.TextColor3 = Color3.fromRGB(110,110,120)
+            lbl.TextSize = 10
+            lbl.Font = Enum.Font.GothamBold
+            lbl.TextXAlignment = Enum.TextXAlignment.Left
+            lbl.Parent = itemsFrame
+            return lbl
+        end
+
+        function colObj:AddTextbox(tbOpts)
+            tbOpts = tbOpts or {}
+            local name        = (tbOpts.Name or "Input"):upper()
+            local placeholder = tbOpts.Placeholder or ""
+            local callback    = tbOpts.Callback or function() end
+
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1,0,0,46)
+            row.BackgroundTransparency = 1
+            row.Parent = itemsFrame
+
+            local nLbl = Instance.new("TextLabel")
+            nLbl.Size = UDim2.new(1,0,0,16)
+            nLbl.BackgroundTransparency = 1
+            nLbl.Text = name
+            nLbl.TextColor3 = Color3.fromRGB(205,205,212)
+            nLbl.TextSize = 11
+            nLbl.Font = Enum.Font.GothamBold
+            nLbl.TextXAlignment = Enum.TextXAlignment.Left
+            nLbl.Parent = row
+
+            local box = Instance.new("TextBox")
+            box.Size = UDim2.new(1,0,0,24)
+            box.Position = UDim2.new(0,0,0,18)
+            box.BackgroundColor3 = Color3.fromRGB(24,24,28)
+            box.Text = ""
+            box.PlaceholderText = placeholder
+            box.PlaceholderColor3 = Color3.fromRGB(88,88,98)
+            box.TextColor3 = Color3.fromRGB(205,205,212)
+            box.TextSize = 11
+            box.Font = Enum.Font.Gotham
+            box.BorderSizePixel = 0
+            box.ClearTextOnFocus = false
+            corner(box, 5)
+            stroke(box, Color3.fromRGB(255,255,255), 1, 0.88)
+            box.Parent = row
+
+            box.FocusLost:Connect(function(entered)
+                if entered then task.spawn(callback, box.Text) end
+            end)
+
+            return box
+        end
+
+        return colObj
+    end
+
+    return win
+end
+
+return AxciaLib
